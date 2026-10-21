@@ -1,0 +1,45 @@
+# Checks for this repo come from https://github.com/buildthehomelab/wow-ci.
+# They pick themselves based on what the repo contains (C++, SQL, Lua/.toc, PHP, shell, Python).
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: buildthehomelab/wow-ci/.github/workflows/ci.yml@main
+    permissions:
+      contents: read
+      packages: read
+    with:
+      # OptimalBotRaidApi.h, and IndividualProgression.h for the progression checks.
+      extra-modules: "buildthehomelab/wow-mod-optimal-bot-raid@master buildthehomelab/wow-mod-individual-progression@main"
+
+  # Runs the command code against tests/finder.cpp's stand-in core, and the addon's
+  # protocol model and UI handlers under plain Lua 5.1.
+  finder-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Lua 5.1
+        run: sudo apt-get update && sudo apt-get install -y lua5.1
+      - name: Server command contract
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror -Wno-missing-field-initializers tests/finder.cpp -o /tmp/finder-test
+          /tmp/finder-test
+          c++ -std=c++17 -Wall -Wextra -Werror -Wno-missing-field-initializers -DRAID_FINDER_IP tests/finder.cpp -o /tmp/finder-ip-test
+          /tmp/finder-ip-test
+      - name: Client protocol and UI interactions
+        run: |
+          lua5.1 tests/model.lua
+          lua5.1 tests/ui.lua

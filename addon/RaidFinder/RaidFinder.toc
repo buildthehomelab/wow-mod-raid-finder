@@ -1,0 +1,8 @@
+## Interface: 30300
+## Title: Raid Finder
+## Notes: Assemble a bot raid and gather it at the meeting stone. Needs the mod-raid-finder server module.
+## Author: buildthehomelab
+## Version: 1.0.0
+## OptionalDeps: DragonUI, DungeonClear, Journal
+Model.lua
+RaidFinder.lua

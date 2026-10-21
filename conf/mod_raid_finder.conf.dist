@@ -1,0 +1,39 @@
+[worldserver]
+
+########################################
+# mod-raid-finder
+########################################
+#
+#    RaidFinder.Enable
+#        Description: Master switch for the Raid Finder (/lfr, addon/RaidFinder). Each raid also
+#                     needs its own switch below. This is a menu and gathering flow for the
+#                     existing Normal raids, not a new difficulty.
+#        Default:     0 - (Off)
+#                     1 - (On)
+
+RaidFinder.Enable = 0
+
+#
+#    RaidFinder.mc
+#    RaidFinder.bwl
+#        Description: Offer Molten Core / Blackwing Lair in the Raid Finder. Turn a raid on only
+#                     after a full run works on your realm.
+#        Default:     0 - (Off)
+#                     1 - (On)
+
+RaidFinder.mc = 0
+RaidFinder.bwl = 0
+
+#
+#    RaidFinder.mc.MeetingStoneSpawn
+#    RaidFinder.bwl.MeetingStoneSpawn
+#        Description: Gameobject spawn GUID (not the template entry) of the outdoor meeting
+#                     stone the raid gathers at. The defaults are the stock Blackrock stones:
+#                     427 at the Blackrock Depths approach for MC, 428 at the Blackrock Spire
+#                     approach for BWL. Missing spawns, objects that aren't meeting stones and
+#                     stones inside an instance are refused; the finder never teleports into
+#                     the raid instead. Check the landing spot and the walk in.
+#        Default:     427 (mc), 428 (bwl)
+
+RaidFinder.mc.MeetingStoneSpawn = 427
+RaidFinder.bwl.MeetingStoneSpawn = 428

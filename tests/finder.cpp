@@ -371,6 +371,9 @@ int main() {
 #ifdef RAID_FINDER_LEGACY
     // Summon to Stone is the Legacy perk; Gather Bots at the stone stays free.
     raid25.slots.clear(); raid25.refs.clear(); leader.group = nullptr; leader.level = 60;
+    Group perkGroup; perkGroup.Add(leader);
+    Player helper{60}; helper.bot = helper.random = true; players[60] = &helper; perkGroup.Add(helper);
+    drafted[1] = { 60 };
     leader.perk = false;
     leader.session.packets.clear();
     Commands::HandleFinder(&handler, "status", std::string("mc"));
@@ -380,6 +383,7 @@ int main() {
     Commands::FinderTravelToStone(&leader, point());
     Commands::HandleFinder(&handler, "rally", std::string("mc"));
     assert(leader.session.last.find("RESULT\trally\tmc\t1") != std::string::npos);
+    assert(Commands::FinderAtStone(&helper, point())); // the stone still gathers drafted bots
     Legacy::legacyConfig.enabled = false;
     leader.map = 1;
     Commands::HandleFinder(&handler, "summon", std::string("mc"));

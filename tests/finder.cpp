@@ -89,6 +89,7 @@ struct Bind { InstanceSave* save = nullptr; bool perm = false; };
 struct Saves {
     std::map<ObjectGuid, Bind> binds;
     Bind* PlayerGetBoundInstance(ObjectGuid id, uint32, int) { auto it = binds.find(id); return it == binds.end() ? nullptr : &it->second; }
+    void PlayerUnbindInstance(ObjectGuid id, uint32, int, bool, Player*) { binds.erase(id); }
 } saves;
 auto* sInstanceSaveMgr = &saves;
 constexpr uint32 GAMEOBJECT_TYPE_MEETINGSTONE = 23;
@@ -269,6 +270,14 @@ int main() {
     saves.binds[1] = {&leaderSave, true}; saves.binds[2] = {&otherSave, true};
     assert(Commands::FinderProblem(&leader, raid).find("different raid save") != std::string::npos);
     saves.binds.clear();
+    // A random bot outside the raid drops a stale save; a human, a bot inside and a bot on the leader's save keep theirs.
+    InstanceSave staleSave{30};
+    bots[5].map = 0;
+    saves.binds[bots[5].id] = {&staleSave, true}; saves.binds[bots[6].id] = {&staleSave, true};
+    saves.binds[40] = {&staleSave, true}; saves.binds[1] = {&leaderSave, true}; saves.binds[bots[7].id] = {&leaderSave, true};
+    assert(Commands::FinderClearBotSaves(&leader, raid) == 1);
+    assert(!saves.binds.count(bots[5].id) && saves.binds.count(bots[6].id) && saves.binds.count(40) && saves.binds.count(bots[7].id));
+    saves.binds.clear(); bots[5].map = 409;
     players.erase(40);
     assert(!Commands::FinderProblem(&leader, raid).empty()); players[40] = &bots.back();
     ChatHandler follower{&bots.back()};

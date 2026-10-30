@@ -140,6 +140,29 @@ static std::string FinderMemberProblem(Player* member, FinderRaid const& raid)
     return "";
 }
 
+// Random bots keep saves from their own runs. Drop a random bot's save to this raid
+// when it differs from the leader's, so it follows the leader into one instance.
+// Humans and alts keep their saves, and so does a bot already inside the raid.
+static uint32 FinderClearBotSaves(Player* player, FinderRaid const& raid)
+{
+    Group* group = player->GetGroup();
+    if (!group) return 0;
+    auto const* leaderBind = sInstanceSaveMgr->PlayerGetBoundInstance(group->GetLeaderGUID(), raid.map, RAID_DIFFICULTY_10MAN_NORMAL);
+    uint32 const leaderSave = leaderBind && leaderBind->save ? leaderBind->save->GetInstanceId() : 0;
+    uint32 cleared = 0;
+    for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
+    {
+        Player* bot = ref->GetSource();
+        if (!bot || bot->GetMapId() == raid.map || !PlayerbotsMgr::instance().GetPlayerbotAI(bot) || !sRandomPlayerbotMgr.IsRandomBot(bot))
+            continue;
+        auto const* bind = sInstanceSaveMgr->PlayerGetBoundInstance(bot->GetGUID(), raid.map, RAID_DIFFICULTY_10MAN_NORMAL);
+        if (!bind || !bind->save || bind->save->GetInstanceId() == leaderSave) continue;
+        sInstanceSaveMgr->PlayerUnbindInstance(bot->GetGUID(), raid.map, RAID_DIFFICULTY_10MAN_NORMAL, true, bot);
+        ++cleared;
+    }
+    return cleared;
+}
+
 // Only status is allowed during combat; actions recheck live group membership and saves.
 static std::string FinderProblem(Player* player, FinderRaid const& raid, bool ready = false)
 {
@@ -232,6 +255,7 @@ static bool HandleFinder(ChatHandler* handler, std::string action, Optional<std:
     }
     if (action != "assemble" && action != "summon" && action != "rally" && action != "ready")
         return reply(false, "Unknown Raid Finder action.");
+    if (!group || group->IsLeader(player->GetGUID())) FinderClearBotSaves(player, raid);
     if (std::string problem = FinderProblem(player, raid, action == "ready"); !problem.empty())
         return reply(false, problem);
     if (action == "assemble")
@@ -242,6 +266,7 @@ static bool HandleFinder(ChatHandler* handler, std::string action, Optional<std:
             return reply(false, "Autonomous runs currently support human healers and damage dealers. A bot tank leads.");
         OptimalBotRaid::Assemble(handler, raid.alias, 40, 60, 60);
         group = player->GetGroup();
+        FinderClearBotSaves(player, raid);
         if (!group || group->GetMembersCount() != 40)
             return reply(false, "Recruitment is incomplete. See chat for availability and cooldown details; retry or dismiss drafted bots.");
         // Check roles before offering entry, even though the assembler may have filled scarce roles with DPS.

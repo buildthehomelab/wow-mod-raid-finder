@@ -32,7 +32,8 @@ folder. Re-run CMake, rebuild, and copy `conf/mod_raid_finder.conf.dist` to
 `mod_raid_finder.conf`.
 
 Copy `addon/RaidFinder` into the client's `Interface/AddOns`, or hand it out with Portalkeeper
-(`sql/portalkeeper_addon.sql`). Open it with `/lfr` or `/raidfinder`. The server module and the
+(`sql/portalkeeper_addon.sql`). Open it with `/lfr` or `/raidfinder`. `/lfr` replaces the client's Raid Browser command; the
+Raid Browser is still in the Looking For Group window. The server module and the
 addon ship together so their protocol versions match.
 
 ## Configuration
@@ -77,7 +78,10 @@ the entrance against your terrain and client patches.
    combat, same instance) and then asks Dungeon Clear to start; it won't start while the group
    is still outside. Stopping doesn't clear saves or leave the raid.
 
-Existing saves are kept, and a member with a different permanent save blocks the run. The save
+Random bots in the raid drop their own save to it when it differs from the leader's (bots
+keep saves from earlier runs), so they follow the leader into one instance; a bot already inside
+keeps its save. Humans and alts keep theirs, and a human or alt with a different permanent save
+blocks the run. The save
 shown is the player's own, not a promise of a fresh instance or loot. Human healers and damage
 dealers can lead; a bot tank leads the run (human tanks aren't supported yet). Drafted bots
 follow raid leadership and are forgotten on a worldserver restart.

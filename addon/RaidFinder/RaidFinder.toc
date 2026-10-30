@@ -2,7 +2,7 @@
 ## Title: Raid Finder
 ## Notes: A Raid Finder tab in the Raid Browser: fill a raid with bots and gather at its meeting stone. Needs the mod-raid-finder server module.
 ## Author: buildthehomelab
-## Version: 2.0.0
+## Version: 2.0.1
 ## OptionalDeps: DragonUI, DungeonClear, Journal
 Model.lua
 RaidFinder.lua

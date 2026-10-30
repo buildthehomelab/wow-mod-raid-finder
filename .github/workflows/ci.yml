@@ -19,8 +19,9 @@ jobs:
       contents: read
       packages: read
     with:
-      # OptimalBotRaidApi.h, and IndividualProgression.h for the progression checks.
-      extra-modules: "buildthehomelab/wow-mod-optimal-bot-raid@master buildthehomelab/wow-mod-individual-progression@main"
+      # OptimalBotRaidApi.h, IndividualProgression.h for the progression checks, and Legacy.h
+      # for the Summoning Stone perk.
+      extra-modules: "buildthehomelab/wow-mod-optimal-bot-raid@master buildthehomelab/wow-mod-individual-progression@main buildthehomelab/wow-mod-legacy@main"
 
   # Runs the command code against tests/finder.cpp's stand-in core, and the addon's
   # protocol model and UI handlers under plain Lua 5.1.
@@ -39,6 +40,8 @@ jobs:
           /tmp/finder-test
           c++ -std=c++17 -Wall -Wextra -Werror -Wno-missing-field-initializers -DRAID_FINDER_IP tests/finder.cpp -o /tmp/finder-ip-test
           /tmp/finder-ip-test
+          c++ -std=c++17 -Wall -Wextra -Werror -Wno-missing-field-initializers -DRAID_FINDER_IP -DRAID_FINDER_LEGACY tests/finder.cpp -o /tmp/finder-legacy-test
+          /tmp/finder-legacy-test
       - name: Client protocol and UI interactions
         run: |
           lua5.1 tests/model.lua

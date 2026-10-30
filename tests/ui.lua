@@ -1,22 +1,58 @@
--- Exercise the real addon under a minimal 3.3.5-style frame/event API.
+-- Exercise the real addon under a minimal 3.3.5-style frame/event API, inside a stand-in
+-- Raid Browser (LFRParentFrame with its two stock tabs).
 local frames, buttons, sent = {}, {}, {}
 local methods = {}
 function methods:SetScript(name, fn) self.scripts[name] = fn end
-function methods:SetText(text) self.text = text; if self.kind == 'Button' then buttons[text] = self end end
-function methods:Show() self.shown = true; if self.scripts.OnShow then self.scripts.OnShow(self) end end
+function methods:SetText(text) self.text = text; if self.kind == 'Button' and self.bar then buttons[text] = self end end
+function methods:GetText() return self.text end
+function methods:Show() local was = self.shown; self.shown = true; if not was and self.scripts.OnShow then self.scripts.OnShow(self) end end
 function methods:Hide() self.shown = false end
 function methods:IsShown() return self.shown end
 function methods:Enable() self.enabled = true end
 function methods:Disable() self.enabled = false end
-function methods:CreateFontString() return setmetatable({ scripts = {} }, { __index = methods }) end
+function methods:SetPoint(...) self.point = { ... } end
+local function region(_, name)
+    local r = setmetatable({ scripts = {} }, { __index = methods })
+    if name then _G[name] = r end
+    return r
+end
+methods.CreateFontString, methods.CreateTexture = region, region
 setmetatable(methods, { __index = function() return function() end end })
-function CreateFrame(kind, name)
-    local f = setmetatable({ kind = kind, name = name, scripts = {}, enabled = true }, { __index = methods })
+function CreateFrame(kind, name, parent, template)
+    local f = setmetatable({ kind = kind, name = name, parent = parent, template = template, scripts = {}, enabled = true }, { __index = methods })
+    -- The bottom bar's buttons are the panel's UIPanelButtonTemplate2 children.
+    f.bar = kind == 'Button' and template == 'UIPanelButtonTemplate2'
     frames[#frames + 1] = f
     if name then _G[name] = f end
     return f
 end
 UIParent = {}; UISpecialFrames = {}; StaticPopupDialogs = {}; SlashCmdList = {}; hash_SlashCmdList = {}; CANCEL = 'Cancel'
+LFRParentFrame = CreateFrame('Frame', 'LFRParentFrame')
+CreateFrame('Button', 'LFRParentFrameTab2', LFRParentFrame)
+CreateFrame('Frame', 'LFRQueueFrame', LFRParentFrame)
+CreateFrame('Frame', 'LFRBrowseFrame', LFRParentFrame)
+local numTabs, selectedTab
+function PanelTemplates_SetNumTabs(_, n) numTabs = n end
+function PanelTemplates_SetTab(_, n) selectedTab = n end
+-- The stock function, which only knows tabs 1 and 2.
+function LFRFrame_SetActiveTab(tab)
+    if tab == 1 then LFRParentFrame.activeTab = 1; LFRQueueFrame:Show(); LFRBrowseFrame:Hide()
+    elseif tab == 2 then LFRParentFrame.activeTab = 2; LFRBrowseFrame:Show(); LFRQueueFrame:Hide() end
+    PanelTemplates_SetTab(LFRParentFrame, tab)
+end
+function hooksecurefunc(name, hook)
+    local original = _G[name]
+    _G[name] = function(...) original(...); hook(...) end
+end
+function ShowUIPanel(f) f:Show() end
+function HideUIPanel(f) f:Hide() end
+function PlaySound() end
+local scrollOffset = 0
+function FauxScrollFrame_GetOffset() return scrollOffset end
+function FauxScrollFrame_Update() end
+function FauxScrollFrame_OnVerticalScroll() end
+local instanceType = 'none'
+function IsInInstance() return instanceType ~= 'none', instanceType end
 local now = 0
 local lastNonce
 function GetTime() return now end
@@ -39,92 +75,142 @@ function StaticPopup_Show(which) popup = { which = which }; return popup end
 function StaticPopup_Hide() popup = nil end
 dofile('addon/RaidFinder/Model.lua')
 dofile('addon/RaidFinder/RaidFinder.lua')
-local f = RaidFinderFrame
+LFRFrame_SetActiveTab(1)
+local panel = RaidFinderPanel
 local events = frames[#frames]
 local function message(text, sender, nonce)
-    text = "2\t" .. (nonce or lastNonce) .. "\t" .. string.sub(text, 3)
+    text = "3\t" .. (nonce or lastNonce) .. "\t" .. string.sub(text, 3)
     events.scripts.OnEvent(events, 'CHAT_MSG_ADDON', 'RAIDFINDER', text, 'WHISPER', sender or 'Tester')
 end
+local function catalogue(...)
+    message('1\tBEGIN')
+    for _, line in ipairs({ ... }) do message('1\tRAID\t' .. line) end
+    message('1\tEND')
+end
+local MC = 'mc\tMolten Core\t409\t0\t60\t40\t5\t11\t24\t1'
+local BWL = 'bwl\tBlackwing Lair\t469\t0\t60\t40\t5\t13\t22\t1'
+
+-- /lfr opens the Raid Browser on our tab; the stock frames hide, the catalogue is asked for.
+assert(numTabs == 3 and LFRParentFrameTab3 and LFRParentFrameTab3.text == 'Raid Finder')
 assert(hash_SlashCmdList['/LFR'] == SlashCmdList.RAIDFINDER, '/lfr must open Raid Finder, not the Raid Browser')
+assert(not panel.shown and LFRQueueFrame.shown)
 SlashCmdList.RAIDFINDER()
+assert(LFRParentFrame.shown and panel.shown and not LFRQueueFrame.shown and not LFRBrowseFrame.shown and selectedTab == 3)
 assert(sent[#sent][1] == '.raidfinder catalog')
-message('1\tBEGIN')
-message('1\tRAID\tmc\tMolten Core\t409\t2\t3\t35\t1')
-message('1\tEND')
+LFRFrame_SetActiveTab(1)
+assert(not panel.shown and LFRQueueFrame.shown, 'the stock tabs still work')
+LFRParentFrameTab3.scripts.OnClick(LFRParentFrameTab3)
+assert(panel.shown and not LFRQueueFrame.shown)
+-- Re-showing the tab invalidated the catalogue in flight: its reply is stale, a new one follows.
+catalogue(MC)
+assert(not RaidFinderPanelListButton1.shown, 'a catalogue from before the tab was re-shown is stale')
+panel.scripts.OnUpdate(panel, 0)
+assert(sent[#sent][1] == '.raidfinder catalog')
+catalogue(MC, BWL, 'naxx10\tNaxxramas\t533\t2\t80\t10\t2\t2\t6\t1', 'naxx25\tNaxxramas\t533\t2\t80\t25\t3\t5\t17\t1')
 assert(sent[#sent][1] == '.raidfinder status mc')
-message('1\tSTATUS\tmc\t1\t3\tNo personal raid save.')
+-- Headers over their raids; same-named raids show their size.
+assert(RaidFinderPanelListButton1.header == 0 and RaidFinderPanelListButton2.alias == 'mc')
+assert(RaidFinderPanelListButton4.header == 2 and RaidFinderPanelListButton5.alias == 'naxx10')
+assert(RaidFinderPanelListButton5.name.text == 'Naxxramas (10)' and RaidFinderPanelListButton2.name.text == 'Molten Core')
+RaidFinderPanelListButton1.scripts.OnClick(RaidFinderPanelListButton1)
+assert(RaidFinderPanelListButton2.header == 2, 'a collapsed header hides its raids')
+RaidFinderPanelListButton1.scripts.OnClick(RaidFinderPanelListButton1)
+assert(RaidFinderPanelListButton2.alias == 'mc')
+message('1\tSTATUS\tmc\t1\t3\tNo personal raid save.\t1\tstone')
 message('1\tRESULT\tstatus\tmc\t1\tReady')
-buttons['Find Raid'].scripts.OnClick()
+assert(RaidFinderPanelRoleTank.count.text == '5' and RaidFinderPanelRoleDamage.mine.shown and not RaidFinderPanelRoleTank.mine.shown)
+assert(RaidFinderPanelInfo.text:find('Roster 1 / 40'))
+-- Recruit: Find Raid, Journal, Dismiss Bots.
+assert(buttons['Find Raid'].enabled and buttons['Journal'] and buttons['Dismiss Bots'])
+buttons['Find Raid'].scripts.OnClick(buttons['Find Raid'])
 assert(sent[#sent][1] == '.raidfinder assemble mc')
 message('1\tRESULT\tassemble\tmc\t1\tAssembled', 'OtherPlayer')
 assert(not popup, 'other players cannot offer entry')
 events.scripts.OnEvent(events, 'RAID_ROSTER_UPDATE')
 message('1\tRESULT\tassemble\tmc\t0\tShort of healers')
 assert(not popup, 'failed assembly must not offer travel')
-now = now + 0.5; f.scripts.OnUpdate(f, 0.5)
-message('1\tBEGIN'); message('1\tRAID\tmc\tMolten Core\t409\t2\t3\t35\t1'); message('1\tEND')
+now = now + 0.5; panel.scripts.OnUpdate(panel, 0.5)
+catalogue(MC, BWL)
 message('1\tRESULT\tstatus\tmc\t1\tReady')
-buttons['Find Raid'].scripts.OnClick()
+assert(RaidFinderPanelNotice.text == 'Short of healers')
+buttons['Find Raid'].scripts.OnClick(buttons['Find Raid'])
 events.scripts.OnEvent(events, 'PARTY_MEMBERS_CHANGED')
 message('1\tRESULT\tassemble\tmc\t1\tAssembled')
 assert(not popup, 'revalidate the assembled roster before offering travel')
-now = now + 0.5; f.scripts.OnUpdate(f, 0.5)
-message('1\tBEGIN'); message('1\tRAID\tmc\tMolten Core\t409\t2\t3\t35\t1'); message('1\tEND')
+now = now + 0.5; panel.scripts.OnUpdate(panel, 0.5)
+catalogue(MC, BWL)
+message('1\tSTATUS\tmc\t40\t3\tNo personal raid save.\t1\tstone')
 message('1\tRESULT\tstatus\tmc\t1\tReady')
 assert(popup and popup.which == 'RAIDFINDER_ENTER')
--- A late roster update after the reply must not lose the successful result.
-events.scripts.OnEvent(events, 'RAID_ROSTER_UPDATE')
-assert(not popup)
-now = now + 0.5; f.scripts.OnUpdate(f, 0.5)
-message('1\tBEGIN'); message('1\tRAID\tmc\tMolten Core\t409\t2\t3\t35\t1'); message('1\tEND')
-message('1\tRESULT\tstatus\tmc\t1\tReady')
-assert(popup)
+-- Gather: Summon to Stone, Gather Bots, Dismiss Bots once the roster is full.
+assert(buttons['Summon to Stone'].enabled and buttons['Gather Bots'].enabled)
 StaticPopupDialogs.RAIDFINDER_ENTER.OnAccept(popup)
 assert(sent[#sent][1] == '.raidfinder summon mc')
+message('1\tRESULT\tsummon\tmc\t1\tSummoning')
 events.scripts.OnEvent(events, 'PLAYER_ENTERING_WORLD')
-assert(not buttons['Gather Bots'].enabled)
-now = now + 0.5; f.scripts.OnUpdate(f, 0.5)
-message('1\tBEGIN')
-message('1\tRAID\tmc\tMolten Core\t409\t2\t3\t35\t1')
-message('1\tEND')
+local bar = buttons['Summon to Stone']
+assert(bar.text == 'Find Raid' and not bar.enabled, 'nothing is offered until the catalogue is fresh')
+now = now + 0.5; panel.scripts.OnUpdate(panel, 0.5)
+catalogue(MC, BWL)
+message('1\tSTATUS\tmc\t40\t3\tNo personal raid save.\t1\tstone')
 message('1\tRESULT\tstatus\tmc\t1\tReady')
-buttons['Gather Bots'].scripts.OnClick()
+buttons['Gather Bots'].scripts.OnClick(buttons['Gather Bots'])
+assert(sent[#sent][1] == '.raidfinder rally mc')
 message('1\tRESULT\trally\tmc\t1\tArriving')
-buttons['Start Run'].scripts.OnClick()
+print('PASS: Raid Browser tab 3, /lfr, headers and sizes, roles, sender authentication, assembly failure/success, summon confirmation, rally')
+
+-- Without the Legacy perk Summon to Stone stays visible but disabled, and isn't offered.
+events.scripts.OnEvent(events, 'RAID_ROSTER_UPDATE')
+now = now + 0.5; panel.scripts.OnUpdate(panel, 0.5)
+catalogue(MC, BWL)
+message('1\tSTATUS\tmc\t40\t3\tNo personal raid save.\t0\tstone')
+message('1\tRESULT\tstatus\tmc\t1\tReady')
+assert(not buttons['Summon to Stone'].enabled and buttons['Summon to Stone'].tip:find('Legacy perk Summoning Stone'))
+assert(buttons['Gather Bots'].enabled)
+print('PASS: no Legacy perk: Summon disabled with the perk named, Gather Bots still offered')
+
+-- Run: inside a raid the bar becomes Start Run, Pause, Stop Run.
+instanceType = 'raid'
+events.scripts.OnEvent(events, 'PLAYER_ENTERING_WORLD')
+now = now + 0.5; panel.scripts.OnUpdate(panel, 0.5)
+catalogue(MC, BWL)
+message('1\tSTATUS\tmc\t40\t3\tNo personal raid save.\t1\tstone')
+message('1\tRESULT\tstatus\tmc\t1\tReady')
+assert(buttons['Start Run'].enabled and buttons['Pause'] and buttons['Stop Run'])
+buttons['Start Run'].scripts.OnClick(buttons['Start Run'])
 message('1\tRESULT\tready\tmc\t0\tNot arrived')
 assert(sent[#sent][1] == '.raidfinder ready mc', 'failed readiness must not start DC')
-buttons['Start Run'].scripts.OnClick()
+buttons['Start Run'].scripts.OnClick(buttons['Start Run'])
 message('1\tRESULT\tready\tmc\t1\tReady')
 assert(sent[#sent-1][1] == '.dc on')
 local count = #sent
 message('1\tRESULT\tready\tmc\t1\tReady')
 assert(#sent == count, 'replay must not issue another DC command')
-buttons.Refresh.scripts.OnClick()
-now = now + 11; f.scripts.OnUpdate(f, 11)
-assert(buttons.Refresh.enabled, 'timeout must unlock the UI')
-print('PASS: real addon catalogue, status, assembly failure/success, sender authentication, entry confirmation, rally, readiness, replay, timeout')
+buttons['Start Run'].scripts.OnClick(buttons['Start Run'])
+now = now + 11; panel.scripts.OnUpdate(panel, 11)
+assert(buttons['Start Run'].enabled, 'timeout must unlock the UI')
+instanceType = 'none'
+print('PASS: run bar, readiness failure/success, replay, timeout')
 
--- Refresh remains usable when no content is eligible; no launch button is offered.
-buttons.Refresh.scripts.OnClick()
-message('1\tBEGIN')
-message('1\tEND')
-assert(buttons.Refresh.enabled and not buttons['Find Raid'].enabled and not buttons['Summon to Stone'].enabled)
+-- An empty catalogue offers nothing to launch.
 events.scripts.OnEvent(events, 'QUEST_LOG_UPDATE')
-assert(not buttons['Start Run'].enabled)
-now = now + 0.5; f.scripts.OnUpdate(f, 0.5)
+now = now + 11; panel.scripts.OnUpdate(panel, 11)
 assert(sent[#sent][1] == '.raidfinder catalog')
-print('PASS: arrival/progression events invalidate offers and refresh the catalogue; empty catalogue cannot launch')
-
+catalogue()
+assert(not buttons['Find Raid'].enabled and not RaidFinderPanelListButton1.shown)
 -- An old END must not complete a newer catalogue after the first request times out.
 local oldNonce = lastNonce
-now = now + 11; f.scripts.OnUpdate(f, 11)
-buttons.Refresh.scripts.OnClick()
-assert(lastNonce ~= oldNonce)
-message('1\tBEGIN', nil, oldNonce)
-message('1\tRAID\tbwl\tOld raid\t469\t2\t3\t35\t1', nil, oldNonce)
-message('1\tEND', nil, oldNonce)
-assert(not buttons.Refresh.enabled and not buttons['Find Raid'].enabled)
-message('1\tBEGIN')
-message('1\tEND')
-assert(buttons.Refresh.enabled and not buttons['Find Raid'].enabled)
-print('PASS: real UI rejects timed-out catalogue packets during retry')
+events.scripts.OnEvent(events, 'QUEST_LOG_UPDATE')
+now = now + 0.5; panel.scripts.OnUpdate(panel, 0.5)
+local staleNonce = lastNonce
+now = now + 11; panel.scripts.OnUpdate(panel, 11)
+events.scripts.OnEvent(events, 'QUEST_LOG_UPDATE')
+now = now + 0.5; panel.scripts.OnUpdate(panel, 0.5)
+assert(lastNonce ~= staleNonce and lastNonce ~= oldNonce)
+message('1\tBEGIN', nil, staleNonce)
+message('1\tRAID\t' .. BWL, nil, staleNonce)
+message('1\tEND', nil, staleNonce)
+assert(not RaidFinderPanelListButton1.shown, 'a timed-out catalogue cannot restore a raid')
+catalogue()
+assert(not buttons['Find Raid'].enabled)
+print('PASS: empty catalogue cannot launch; timed-out catalogue packets are rejected')

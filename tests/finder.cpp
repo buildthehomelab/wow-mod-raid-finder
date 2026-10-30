@@ -18,7 +18,8 @@ using uint8 = uint8_t;
 using uint32 = uint32_t;
 using ObjectGuid = uint32;
 template<class T> using Optional = std::optional<T>;
-constexpr int RAID_DIFFICULTY_10MAN_NORMAL = 0;
+using Difficulty = int;
+constexpr Difficulty RAID_DIFFICULTY_10MAN_NORMAL = 0, RAID_DIFFICULTY_25MAN_NORMAL = 1;
 constexpr int CHAT_MSG_WHISPER = 1, LANG_ADDON = 2, CHAT_TAG_NONE = 0;
 namespace OptimalBotRaid {
 enum class Role : uint8 { Tank, Healer, Melee, Ranged, Unknown };
@@ -31,7 +32,8 @@ struct Map { bool instance = false; bool Instanceable() const { return instance;
 struct Group;
 struct Player {
     uint32 id, map = 0, instance = 0, level = 60, cls = 1, stage = 1;
-    bool alive = true, combat = false, moving = false, world = true, bot = false, random = false, access = true, teleport = true, excluded = false;
+    bool alive = true, combat = false, moving = false, world = true, bot = false, random = false, access = true, teleport = true, excluded = false, perk = true;
+    Difficulty raidDifficulty = RAID_DIFFICULTY_10MAN_NORMAL;
     float x = 0, y = 0, z = 0, facing = 0;
     Role role = Role::Ranged;
     Group* group = nullptr;
@@ -46,7 +48,9 @@ struct Player {
     bool InBattleground() const { return false; }
     bool InArena() const { return false; }
     uint32 GetLevel() const { return level; }
-    int GetRaidDifficulty() const { return 0; }
+    Difficulty GetRaidDifficulty() const { return raidDifficulty; }
+    void SetRaidDifficulty(Difficulty d) { raidDifficulty = d; }
+    void SendRaidDifficulty(bool) { }
     Map* GetMap() { location.instance = map != 0; return &location; }
     uint32 GetMapId() const { return map; }
     uint32 GetInstanceId() const { return instance; }
@@ -69,7 +73,7 @@ struct GroupReference {
 };
 struct Slot { ObjectGuid guid; };
 struct Group {
-    uint32 leader = 1; bool raid = true, lfg = false;
+    uint32 leader = 1; bool raid = true, lfg = false; Difficulty raidDifficulty = RAID_DIFFICULTY_10MAN_NORMAL;
     std::vector<Slot> slots; std::vector<GroupReference> refs;
     uint32 GetMembersCount() const { return slots.size(); }
     bool isRaidGroup() const { return raid; } bool isLFGGroup() const { return lfg; }
@@ -81,15 +85,17 @@ struct Group {
         return refs.empty() ? nullptr : &refs[0];
     }
     void Add(Player& p) { slots.push_back({p.id}); refs.push_back({&p}); p.group = this; }
+    Difficulty GetRaidDifficulty() const { return raidDifficulty; }
+    void SetRaidDifficulty(Difficulty d) { raidDifficulty = d; for (auto& r : refs) r.player->raidDifficulty = d; }
 };
 std::unordered_map<ObjectGuid, Player*> players;
 namespace ObjectAccessor { Player* FindConnectedPlayer(ObjectGuid id) { auto i = players.find(id); return i == players.end() ? nullptr : i->second; } }
 struct InstanceSave { uint32 id = 10; uint32 GetInstanceId() const { return id; } time_t GetResetTime() const { return 100; } };
-struct Bind { InstanceSave* save = nullptr; bool perm = false; };
+struct Bind { InstanceSave* save = nullptr; bool perm = false; Difficulty difficulty = RAID_DIFFICULTY_10MAN_NORMAL; };
 struct Saves {
     std::map<ObjectGuid, Bind> binds;
-    Bind* PlayerGetBoundInstance(ObjectGuid id, uint32, int) { auto it = binds.find(id); return it == binds.end() ? nullptr : &it->second; }
-    void PlayerUnbindInstance(ObjectGuid id, uint32, int, bool, Player*) { binds.erase(id); }
+    Bind* PlayerGetBoundInstance(ObjectGuid id, uint32, Difficulty d) { auto it = binds.find(id); return it == binds.end() || it->second.difficulty != d ? nullptr : &it->second; }
+    void PlayerUnbindInstance(ObjectGuid id, uint32, Difficulty d, bool, Player*) { if (binds.count(id) && binds[id].difficulty == d) binds.erase(id); }
 } saves;
 auto* sInstanceSaveMgr = &saves;
 constexpr uint32 GAMEOBJECT_TYPE_MEETINGSTONE = 23;
@@ -98,14 +104,17 @@ struct GameObjectTemplate { uint32 type = GAMEOBJECT_TYPE_MEETINGSTONE; };
 struct MapEntry { bool instance = false; bool Instanceable() const { return instance; } };
 struct MapStore {
     MapEntry world{false}, raid{true};
-    MapEntry const* LookupEntry(uint32 id) { return id == 0 ? &world : (id == 409 ? &raid : nullptr); }
+    MapEntry const* LookupEntry(uint32 id) { return id == 0 || id == 1 || id == 530 || id == 571 ? &world : &raid; }
 } sMapStore;
+struct AreaTriggerTeleport { uint32 target_mapId; float target_X, target_Y, target_Z, target_Orientation; };
 struct Objects {
     bool missing = false;
+    AreaTriggerTeleport icecrownExit{571, 5873.82f, 2110.98f, 636.01f, 3.55f};
+    AreaTriggerTeleport const* GetGoBackTrigger(uint32 map) { return map == 631 || map == 649 ? &icecrownExit : nullptr; }
     GameObjectData stone;
     GameObjectTemplate object;
-    void const* GetAccessRequirement(uint32, int) { return nullptr; }
-    GameObjectData const* GetGameObjectData(uint32 spawn) { return !missing && (spawn == 427 || spawn == 428) ? &stone : nullptr; }
+    void const* GetAccessRequirement(uint32, Difficulty) { return nullptr; }
+    GameObjectData const* GetGameObjectData(uint32 spawn) { return !missing && spawn ? &stone : nullptr; }
     GameObjectTemplate const* GetGameObjectTemplate(uint32) { return &object; }
 } objects;
 auto* sObjectMgr = &objects;
@@ -126,19 +135,31 @@ struct ChatHandler;
 std::unordered_map<ObjectGuid, std::unordered_set<ObjectGuid>> drafted;
 int assembleCalls = 0;
 namespace OptimalBotRaid {
-bool GetLineup(std::string const&, uint32 size, Lineup& lineup) { if (size != 40) return false; lineup = {2, 3}; return true; }
+bool GetLineup(std::string const&, uint32 size, Lineup& lineup) { if (size != 10 && size != 20 && size != 25 && size != 40) return false; lineup = {2, 3}; return true; }
 Role GetRaidRole(Player* member) { return member->role; }
 bool Assemble(ChatHandler*, std::string const&, uint32, uint32, uint32) { ++assembleCalls; return true; }
 std::unordered_set<ObjectGuid> DraftedBots(ObjectGuid leader) { auto it = drafted.find(leader); return it == drafted.end() ? std::unordered_set<ObjectGuid>{} : it->second; }
 }
 #ifdef RAID_FINDER_IP
-enum ProgressionState : uint32 { PROGRESSION_START = 0, PROGRESSION_MOLTEN_CORE = 1 };
-struct Progression {
+// Stand-in for Individual Progression's CheckInstanceAccess: BWL needs stage 1, and random or
+// excluded accounts are always let in.
+struct IndividualProgression {
+    struct InstanceAccess { bool allowed = true; std::string message; };
     bool enabled = true;
-    bool isNormalAccount(Player* p) const { return !p->random && !p->excluded; }
-    bool hasPassedProgression(Player* p, ProgressionState stage) const { return enabled && stage && p->stage >= stage; }
+    InstanceAccess CheckInstanceAccess(Player* p, uint32 map) const {
+        if (p->random || p->excluded || map != 469 || p->stage >= 1) return {};
+        return { false, "must complete Molten Core progression to enter Blackwing Lair." };
+    }
 } progression;
 auto* sIndividualProgression = &progression;
+#endif
+#ifdef RAID_FINDER_LEGACY
+namespace Legacy {
+enum Perk : uint8 { PERK_SUMMONING_STONE };
+struct Config { bool enabled = true; } legacyConfig;
+Config const& GetConfig() { return legacyConfig; }
+uint8 Rank(Player const* p, Perk) { return p->perk ? 1 : 0; }
+}
 #endif
 struct ChatHandler {
     Player* player;
@@ -170,11 +191,16 @@ int main() {
     leader.session.packets.clear();
     Commands::HandleFinder(&handler, "catalog", std::string("-"), uint32(123));
     for (auto const& packet : leader.session.packets)
-        assert(packet.find("RAIDFINDER\t2\t123\t") == 0);
+        assert(packet.find("RAIDFINDER\t3\t123\t") == 0);
     leader.session.packets.clear();
     Commands::HandleFinder(&handler, "ready", std::string("bwl"), uint32(124));
-    assert(leader.session.last.find("RAIDFINDER\t2\t124\tRESULT\tready\tbwl\t") == 0);
-    auto raid = Commands::FinderRaids()[0];
+    assert(leader.session.last.find("RAIDFINDER\t3\t124\tRESULT\tready\tbwl\t") == 0);
+    auto byId = [](std::string const& id) {
+        for (auto const& r : Commands::FinderRaids()) if (id == r.id) return r;
+        assert(false && "unknown raid id"); return Commands::FinderRaids()[0];
+    };
+    auto raid = byId("mc");
+    auto point = [&]() { return *Commands::FinderStone(raid); };
     config.enabled = false;
     assert(!Commands::FinderProblem(&leader, raid).empty());
     config.enabled = true;
@@ -193,9 +219,9 @@ int main() {
         assert(leader.session.last.find("complete Molten Core") != std::string::npos);
     }
     assert(assembleCalls == 0 && leader.map == 0);
-    assert(Commands::FinderProblem(&leader, Commands::FinderRaids()[1]).find("complete Molten Core") != std::string::npos);
+    assert(Commands::FinderProblem(&leader, byId("bwl")).find("complete Molten Core") != std::string::npos);
     leader.stage = 1;
-    assert(Commands::FinderProblem(&leader, Commands::FinderRaids()[1]).empty());
+    assert(Commands::FinderProblem(&leader, byId("bwl")).empty());
     assert(catalogue().find("RAID\tbwl\t") != std::string::npos);
     leader.stage = 18;
     assert(catalogue().find("RAID\tmc\t") != std::string::npos); // prior tiers remain unlocked
@@ -213,7 +239,7 @@ int main() {
     Player friendAtStart{99}; friendAtStart.stage = 0; players[99] = &friendAtStart;
     group.Add(friendAtStart);
     assert(catalogue().find("RAID\tbwl\t") == std::string::npos);
-    assert(!Commands::FinderProblem(&leader, Commands::FinderRaids()[1]).empty());
+    assert(!Commands::FinderProblem(&leader, byId("bwl")).empty());
     // Alt bots on normal accounts keep their character gates; random/excluded accounts follow IP policy.
     friendAtStart.bot = true;
     assert(catalogue().find("RAID\tbwl\t") == std::string::npos);
@@ -241,11 +267,11 @@ int main() {
     drafted[1].erase(40);
     ChatHandler friendHandler{&bots.back()};
     Commands::HandleFinder(&friendHandler, "summon", std::string("mc"));
-    assert(Commands::FinderAtStone(&bots.back(), objects.stone)); // humans may gather in any order outdoors
-    assert(!Commands::FinderAtStone(&leader, objects.stone)); // a friend's confirmation never moves another human
+    assert(Commands::FinderAtStone(&bots.back(), point())); // humans may gather in any order outdoors
+    assert(!Commands::FinderAtStone(&leader, point())); // a friend's confirmation never moves another human
     Commands::HandleFinder(&handler, "summon", std::string("mc"));
-    assert(Commands::FinderAtStone(&leader, objects.stone));
-    for (auto& bot : bots) assert(Commands::FinderAtStone(&bot, objects.stone));
+    assert(Commands::FinderAtStone(&leader, point()));
+    for (auto& bot : bots) assert(Commands::FinderAtStone(&bot, point()));
     assert(leader.map == 0 && leader.instance == 0); // no direct raid entry
     assert(!Commands::FinderProblem(&leader, raid, true).empty()); // Start Run still requires real entry
     Commands::HandleFinder(&handler, "rally", std::string("mc"));
@@ -283,17 +309,17 @@ int main() {
     ChatHandler follower{&bots.back()};
     Commands::HandleFinder(&follower, "assemble", std::string("mc"));
     assert(bots.back().session.last.find("Only the raid leader") != std::string::npos);
-    Commands::FinderTravelToStone(&leader, objects.stone);
-    for (auto& bot : bots) Commands::FinderTravelToStone(&bot, objects.stone);
+    Commands::FinderTravelToStone(&leader, point());
+    for (auto& bot : bots) Commands::FinderTravelToStone(&bot, point());
     bots[0].x = 0; bots[0].y = 0; bots[0].z = 0;
     drafted[1].erase(2);
     Commands::HandleFinder(&handler, "rally", std::string("mc"));
-    assert(!Commands::FinderAtStone(&bots[0], objects.stone)); // never teleport a manually invited bot
+    assert(!Commands::FinderAtStone(&bots[0], point())); // never teleport a manually invited bot
     // A player alt is not moved even if a stale ownership entry remains.
     bots[1].random = false; bots[1].x = bots[1].y = bots[1].z = 0;
     Commands::HandleFinder(&handler, "rally", std::string("mc"));
-    assert(!Commands::FinderAtStone(&bots[1], objects.stone));
-    bots[1].random = true; Commands::FinderTravelToStone(&bots[1], objects.stone);
+    assert(!Commands::FinderAtStone(&bots[1], point()));
+    bots[1].random = true; Commands::FinderTravelToStone(&bots[1], point());
     drafted[1].insert(2); bots[0].teleport = false;
     Commands::HandleFinder(&handler, "rally", std::string("mc"));
     assert(leader.session.last.find("could not be summoned") != std::string::npos);
@@ -303,10 +329,66 @@ int main() {
     group.leader = 40;
     bots[0].teleport = true;
     Commands::HandleFinder(&friendHandler, "rally", std::string("mc"));
-    assert(Commands::FinderAtStone(&bots[0], objects.stone));
+    assert(Commands::FinderAtStone(&bots[0], point()));
     drafted[1] = drafted[40]; drafted.erase(40); group.leader = 1;
     leader.map = leader.instance = 0; leader.x = leader.y = leader.z = 0; leader.teleport = false;
     Commands::HandleFinder(&handler, "summon", std::string("mc"));
     assert(leader.map == 0 && leader.session.last.find("Summon refused") != std::string::npos);
-    std::cout << "PASS: progression, exterior stone validation, human consent, full bot gathering, no instance teleport, portal readiness, roles, saves, ownership, refusal\n";
+    // Size-specific offers: the 40-player Onyxia is for levels 60-70, the 10/25 versions for 80.
+    group.slots.clear(); group.refs.clear(); leader.group = nullptr;
+    leader.map = 0; leader.instance = 0; leader.teleport = true; leader.level = 60;
+    assert(catalogue().find("RAID\tony40\t") != std::string::npos);
+    assert(catalogue().find("RAID\tony25\t") == std::string::npos);
+    assert(catalogue().find("RAID\tkara\t") == std::string::npos); // level 70 raid
+    leader.level = 80;
+    assert(catalogue().find("RAID\tony40\t") == std::string::npos);
+    assert(catalogue().find("RAID\tony25\t") != std::string::npos);
+    assert(catalogue().find("RAID\tmc\t") != std::string::npos); // older raids stay open
+    assert(catalogue().find("\tOnyxia's Lair\t249\t2\t80\t25\t2\t3\t20\t1") != std::string::npos);
+    // A raid without a meeting stone gathers at its exit, outside the instance.
+    auto icc = byId("icc25");
+    auto exit = Commands::FinderStone(icc);
+    assert(exit && !exit->stone && exit->map == 571 && exit->x == objects.icecrownExit.target_X);
+    objects.icecrownExit.target_mapId = 631; assert(!Commands::FinderStone(icc)); objects.icecrownExit.target_mapId = 571;
+    // 25-player raids set the solo leader's raid difficulty and check saves of that difficulty.
+    Commands::FinderSetDifficulty(&leader, icc);
+    assert(leader.raidDifficulty == RAID_DIFFICULTY_25MAN_NORMAL);
+    assert(Commands::FinderMemberProblem(&leader, icc).empty());
+    assert(Commands::FinderMemberProblem(&leader, byId("icc10")).find("10 Player") != std::string::npos);
+    leader.raidDifficulty = RAID_DIFFICULTY_10MAN_NORMAL;
+    Group raid25; raid25.Add(leader);
+    Player bot25{50}; bot25.bot = bot25.random = true; players[50] = &bot25; raid25.Add(bot25);
+    InstanceSave tenSave{40}, twentyFiveSave{41};
+    saves.binds[50] = {&tenSave, true, RAID_DIFFICULTY_10MAN_NORMAL};
+    assert(Commands::FinderClearBotSaves(&leader, icc) == 0); // a 10-player save doesn't block a 25-player run
+    saves.binds[50] = {&twentyFiveSave, true, RAID_DIFFICULTY_25MAN_NORMAL};
+    assert(Commands::FinderClearBotSaves(&leader, icc) == 1 && !saves.binds.count(50));
+    Commands::FinderSetDifficulty(&leader, icc);
+    assert(raid25.raidDifficulty == RAID_DIFFICULTY_25MAN_NORMAL && bot25.raidDifficulty == RAID_DIFFICULTY_25MAN_NORMAL);
+    bot25.map = 631; raid25.SetRaidDifficulty(RAID_DIFFICULTY_10MAN_NORMAL);
+    Commands::FinderSetDifficulty(&leader, icc);
+    assert(raid25.raidDifficulty == RAID_DIFFICULTY_10MAN_NORMAL); // never while someone is inside
+#ifdef RAID_FINDER_LEGACY
+    // Summon to Stone is the Legacy perk; Gather Bots at the stone stays free.
+    raid25.slots.clear(); raid25.refs.clear(); leader.group = nullptr; leader.level = 60;
+    Group perkGroup; perkGroup.Add(leader);
+    Player helper{60}; helper.bot = helper.random = true; players[60] = &helper; perkGroup.Add(helper);
+    drafted[1] = { 60 };
+    leader.perk = false;
+    leader.session.packets.clear();
+    Commands::HandleFinder(&handler, "status", std::string("mc"));
+    assert(leader.session.packets.front().find("\tNo personal raid save.\t0\tstone") != std::string::npos);
+    Commands::HandleFinder(&handler, "summon", std::string("mc"));
+    assert(leader.session.last.find("Legacy perk Summoning Stone") != std::string::npos && !Commands::FinderAtStone(&leader, point()));
+    Commands::FinderTravelToStone(&leader, point());
+    Commands::HandleFinder(&handler, "rally", std::string("mc"));
+    assert(leader.session.last.find("RESULT\trally\tmc\t1") != std::string::npos);
+    assert(Commands::FinderAtStone(&helper, point())); // the stone still gathers drafted bots
+    Legacy::legacyConfig.enabled = false;
+    leader.map = 1;
+    Commands::HandleFinder(&handler, "summon", std::string("mc"));
+    assert(leader.session.last.find("Legacy perk") == std::string::npos); // Legacy off: summon is free
+    Legacy::legacyConfig.enabled = true; leader.perk = true;
+#endif
+    std::cout << "PASS: progression, exterior stone validation, human consent, full bot gathering, no instance teleport, portal readiness, roles, saves, ownership, refusal, sizes, exits, difficulty, Legacy perk\n";
 }

@@ -16,7 +16,7 @@ function CreateFrame(kind, name)
     if name then _G[name] = f end
     return f
 end
-UIParent = {}; UISpecialFrames = {}; StaticPopupDialogs = {}; SlashCmdList = {}; CANCEL = 'Cancel'
+UIParent = {}; UISpecialFrames = {}; StaticPopupDialogs = {}; SlashCmdList = {}; hash_SlashCmdList = {}; CANCEL = 'Cancel'
 local now = 0
 local lastNonce
 function GetTime() return now end
@@ -45,6 +45,7 @@ local function message(text, sender, nonce)
     text = "2\t" .. (nonce or lastNonce) .. "\t" .. string.sub(text, 3)
     events.scripts.OnEvent(events, 'CHAT_MSG_ADDON', 'RAIDFINDER', text, 'WHISPER', sender or 'Tester')
 end
+assert(hash_SlashCmdList['/LFR'] == SlashCmdList.RAIDFINDER, '/lfr must open Raid Finder, not the Raid Browser')
 SlashCmdList.RAIDFINDER()
 assert(sent[#sent][1] == '.raidfinder catalog')
 message('1\tBEGIN')

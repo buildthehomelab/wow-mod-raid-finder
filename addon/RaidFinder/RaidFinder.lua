@@ -193,7 +193,12 @@ events:SetScript("OnEvent", function(_, event, prefix, message, channel, sender)
         elseif p[1] == "ERROR" then state.notice = p[2] or "Dungeon Clear error."; Refresh() end
     end
 end)
+local function Toggle() if frame:IsShown() then frame:Hide() else frame:Show() end end
 SLASH_RAIDFINDER1 = "/lfr"
 SLASH_RAIDFINDER2 = "/raidfinder"
-SlashCmdList.RAIDFINDER = function() if frame:IsShown() then frame:Hide() else frame:Show() end end
+SlashCmdList.RAIDFINDER = Toggle
+-- The client already binds /lfr to its Raid Browser. ChatEdit_ParseText looks in
+-- hash_SlashCmdList before it walks SlashCmdList, so claim /LFR there to win.
+-- The Raid Browser stays reachable from the Looking For Group window.
+if hash_SlashCmdList then hash_SlashCmdList["/LFR"] = Toggle end
 Refresh()

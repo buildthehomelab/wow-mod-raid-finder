@@ -22,6 +22,8 @@ function CreateFrame(kind, name, parent, template)
     local f = setmetatable({ kind = kind, name = name, parent = parent, template = template, scripts = {}, enabled = true }, { __index = methods })
     -- The bottom bar's buttons are the panel's UIPanelButtonTemplate2 children.
     f.bar = kind == 'Button' and template == 'UIPanelButtonTemplate2'
+    -- The real template's OnShow/OnEnable/OnDisable concatenate self:GetName().
+    assert(not f.bar or name, 'UIPanelButtonTemplate2 needs a frame name')
     frames[#frames + 1] = f
     if name then _G[name] = f end
     return f

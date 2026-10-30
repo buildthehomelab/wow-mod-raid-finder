@@ -86,8 +86,10 @@ local catalogDue = 0
 local runText = ""
 local requestId = math.floor(GetTime() * 1000) % 2147483646
 
-local function Button(x, width, anchor)
-    local b = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate2")
+-- UIPanelButtonTemplate2's OnShow/OnEnable/OnDisable look up _G[self:GetName() .. "Left"],
+-- so the buttons need global names.
+local function Button(name, x, width, anchor)
+    local b = CreateFrame("Button", "RaidFinderPanel" .. name .. "Button", panel, "UIPanelButtonTemplate2")
     b:SetSize(width, 22)
     b:SetPoint(anchor, x, 12)
     b:SetScript("OnClick", function(self) if self.action then self.action() end end)
@@ -107,7 +109,7 @@ local function Button(x, width, anchor)
     return b
 end
 -- The three stock button slots: List My Name, the middle slot and Set Comment.
-local left, middle, right = Button(21, 125, "BOTTOMLEFT"), Button(147, 85, "BOTTOMLEFT"), Button(-7, 115, "BOTTOMRIGHT")
+local left, middle, right = Button("Left", 21, 125, "BOTTOMLEFT"), Button("Middle", 147, 85, "BOTTOMLEFT"), Button("Right", -7, 115, "BOTTOMRIGHT")
 
 Request = function(action)
     if state.pending then return end

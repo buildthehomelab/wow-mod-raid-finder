@@ -1,8 +1,10 @@
 /*
- * mod-raid-finder: a Raid Finder window (addon/RaidFinder) for full 40-player bot raids.
+ * mod-raid-finder: a Raid Finder tab in the Raid Browser (addon/RaidFinder) for full bot raids,
+ * from Zul'Gurub to Icecrown Citadel.
  *
  * The raid lineups, roles and bot drafting come from mod-optimal-bot-raid through its
- * OptimalBotRaidApi.h; Individual Progression decides which raids a character may join.
+ * OptimalBotRaidApi.h; Individual Progression decides which raids a character may join, and
+ * mod-legacy's Summoning Stone perk unlocks Summon to Stone.
  *
  * Released under the GNU AGPL v3.0, see LICENSE.
  */
@@ -32,6 +34,10 @@
 #if __has_include("IndividualProgression.h")
 #include "IndividualProgression.h"
 #define RAID_FINDER_IP 1
+#endif
+#if __has_include("Legacy.h")
+#include "Legacy.h"
+#define RAID_FINDER_LEGACY 1
 #endif
 #include <cmath>
 #include <string>

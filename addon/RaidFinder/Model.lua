@@ -11,24 +11,35 @@ end
 function M.New()
     return { raids = {}, order = {}, catalogDirty = true, catalogGeneration = 0, notice = "Connecting to the realm..." }
 end
+-- A raid's name, with its size when another offer shares the name (Naxxramas 10 and 25).
+function M.DisplayName(state, alias)
+    local raid = state.raids[alias]
+    if not raid then return "" end
+    for other, r in pairs(state.raids) do
+        if other ~= alias and r.name == raid.name then return raid.name .. " (" .. raid.size .. ")" end
+    end
+    return raid.name
+end
 function M.Invalidate(state)
     state.catalogGeneration = state.catalogGeneration + 1
     state.catalogDirty = true
 end
 function M.Receive(state, message)
     local p = M.Split(message)
-    if p[1] ~= "2" or not state.pending or p[2] ~= tostring(state.pending.id) then return end
+    if p[1] ~= "3" or not state.pending or p[2] ~= tostring(state.pending.id) then return end
     -- Every frame, including BEGIN/END, belongs to one specific server request.
     table.remove(p, 2)
     local kind = p[2]
     if kind == "BEGIN" then
         state.staging, state.stagingOrder, state.stagingId = {}, {}, state.pending.id
     elseif kind == "RAID" and state.staging and state.stagingId == state.pending.id then
-        local map, tanks, healers, damage = tonumber(p[5]), tonumber(p[6]), tonumber(p[7]), tonumber(p[8])
-        if not p[3] or not string.match(p[3], "^[a-z]+$") or not map or not tanks or not healers or not damage then return end
+        local map, header, level, size = tonumber(p[5]), tonumber(p[6]), tonumber(p[7]), tonumber(p[8])
+        local tanks, healers, damage = tonumber(p[9]), tonumber(p[10]), tonumber(p[11])
+        if not p[3] or not string.match(p[3], "^[a-z0-9]+$") or not map or not header or not level or not size
+            or not tanks or not healers or not damage then return end
         if not state.staging[p[3]] then state.stagingOrder[#state.stagingOrder + 1] = p[3] end
-        state.staging[p[3]] = { alias = p[3], name = p[4], map = map,
-            tanks = tanks, healers = healers, damage = damage, enabled = p[9] == "1" }
+        state.staging[p[3]] = { alias = p[3], name = p[4], map = map, header = header, level = level, size = size,
+            tanks = tanks, healers = healers, damage = damage, enabled = p[12] == "1" }
     elseif kind == "END" and state.staging and state.stagingId == state.pending.id then
         local request = state.pending
         if not request or request.action ~= "catalog" then
@@ -45,7 +56,7 @@ function M.Receive(state, message)
         state.catalogDirty = false
         if not state.raids[state.selected] then
             state.selected = state.order[1]
-            state.members, state.role, state.save = nil, nil, nil
+            state.members, state.role, state.save, state.perk, state.gather = nil, nil, nil, nil, nil
         end
         state.notice = state.assemblyResult and state.assemblyResult.message
             or (#state.order == 0 and "No raids are available for your progression, level and group."
@@ -53,6 +64,9 @@ function M.Receive(state, message)
         return "catalog"
     elseif kind == "STATUS" and p[3] == state.selected then
         state.members, state.role, state.save = tonumber(p[4]), tonumber(p[5]), p[6]
+        -- Summon to Stone needs the Legacy perk Summoning Stone; nil while unknown.
+        state.perk = p[7] and p[7] ~= "0"
+        state.gather = p[8] == "entrance" and "entrance" or "stone"
     elseif kind == "RESULT" and state.pending and p[3] == state.pending.action and
         p[4] == state.pending.raid and p[4] == state.selected then
         state.pending = nil

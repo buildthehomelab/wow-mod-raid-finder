@@ -19,7 +19,7 @@ using uint32 = uint32_t;
 using ObjectGuid = uint32;
 template<class T> using Optional = std::optional<T>;
 using Difficulty = int;
-constexpr Difficulty RAID_DIFFICULTY_10MAN_NORMAL = 0, RAID_DIFFICULTY_25MAN_NORMAL = 1;
+constexpr Difficulty RAID_DIFFICULTY_10MAN_NORMAL = 0, RAID_DIFFICULTY_25MAN_NORMAL = 1, RAID_DIFFICULTY_10MAN_HEROIC = 2;
 constexpr int CHAT_MSG_WHISPER = 1, LANG_ADDON = 2, CHAT_TAG_NONE = 0;
 namespace OptimalBotRaid {
 enum class Role : uint8 { Tank, Healer, Melee, Ranged, Unknown };
@@ -57,7 +57,7 @@ struct Player {
     uint32 getClass() const { return cls; }
     Group* GetGroup() const { return group; }
     Session* GetSession() { return &session; }
-    bool Satisfy(void const*, uint32, bool) const { return access; }
+    bool Satisfy(void const* requirement, uint32, bool) const { return access && (!requirement || level >= 80); }
     float GetPositionX() const { return x; } float GetPositionY() const { return y; }
     float GetPositionZ() const { return z; } float GetOrientation() const { return facing; }
     bool TeleportTo(uint32 target, float tx, float ty, float tz, float tf, int = 0, Player* owner = nullptr) {
@@ -113,7 +113,9 @@ struct Objects {
     AreaTriggerTeleport const* GetGoBackTrigger(uint32 map) { return map == 631 || map == 649 ? &icecrownExit : nullptr; }
     GameObjectData stone;
     GameObjectTemplate object;
-    void const* GetAccessRequirement(uint32, Difficulty) { return nullptr; }
+    // The shared maps' normal 10/25 rows require level 80, as in the realm's dungeon_access_template.
+    int level80 = 0;
+    void const* GetAccessRequirement(uint32 map, Difficulty d) { return (map == 249 || map == 533) && d != RAID_DIFFICULTY_10MAN_HEROIC ? &level80 : nullptr; }
     GameObjectData const* GetGameObjectData(uint32 spawn) { return !missing && spawn ? &stone : nullptr; }
     GameObjectTemplate const* GetGameObjectTemplate(uint32) { return &object; }
 } objects;
@@ -338,7 +340,15 @@ int main() {
     group.slots.clear(); group.refs.clear(); leader.group = nullptr;
     leader.map = 0; leader.instance = 0; leader.teleport = true; leader.level = 60;
     assert(catalogue().find("RAID\tony40\t") != std::string::npos);
+    assert(catalogue().find("RAID\tnaxx40\t") != std::string::npos);
     assert(catalogue().find("RAID\tony25\t") == std::string::npos);
+    // The 40-player versions run in the 10-man heroic slot; MC has no other version.
+    Commands::FinderSetDifficulty(&leader, byId("ony40"));
+    assert(leader.raidDifficulty == RAID_DIFFICULTY_10MAN_HEROIC);
+    assert(Commands::FinderMemberProblem(&leader, byId("ony40")).empty());
+    assert(Commands::FinderMemberProblem(&leader, byId("mc")).find("10 Player raid") != std::string::npos);
+    leader.raidDifficulty = RAID_DIFFICULTY_10MAN_NORMAL;
+    assert(Commands::FinderMemberProblem(&leader, byId("naxx40")).find("(Heroic)") != std::string::npos);
     assert(catalogue().find("RAID\tkara\t") == std::string::npos); // level 70 raid
     leader.level = 80;
     assert(catalogue().find("RAID\tony40\t") == std::string::npos);

@@ -65,8 +65,11 @@ static std::vector<FinderRaid> const& FinderRaids()
     return raids;
 }
 
+// Individual Progression runs the 40-player Onyxia and Naxxramas in the 10-man heroic slot; its
+// access rows for that slot are the level 50/60-70 ones (the normal 10-man rows require 80).
 static Difficulty FinderDifficulty(FinderRaid const& raid)
 {
+    if (raid.size == 40 && (raid.map == 249 || raid.map == 533)) return RAID_DIFFICULTY_10MAN_HEROIC;
     return raid.size == 25 ? RAID_DIFFICULTY_25MAN_NORMAL : RAID_DIFFICULTY_10MAN_NORMAL;
 }
 
@@ -203,7 +206,11 @@ static std::string FinderMemberProblem(Player* member, FinderRaid const& raid)
     if (member->IsBeingTeleported() || member->IsInFlight() || member->InBattleground() || member->InArena())
         return who + "is travelling or in PvP.";
     if (member->GetRaidDifficulty() != FinderDifficulty(raid))
+    {
+        if (FinderDifficulty(raid) == RAID_DIFFICULTY_10MAN_HEROIC)
+            return who + "must select 10 Player (Heroic) raid difficulty, the 40-player version.";
         return who + (raid.size == 25 ? "must select 25 Player raid difficulty." : "must select 10 Player raid difficulty.");
+    }
     if (member->GetMap()->Instanceable() && member->GetMapId() != raid.map)
         return who + "must leave the current instance first.";
     // A solo/party preflight is not entry: the assembler has yet to create the raid.
